@@ -2,8 +2,8 @@ name: List.am Apartment Bot
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # Проверка каждые 30 минут (идеально для лимитов)
-  workflow_dispatch: # Кнопка ручного запуска
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
   run-parser:
@@ -22,7 +22,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4
+          pip install cloudscraper beautifulsoup4 requests
 
       - name: Run script
         env:
