@@ -17,14 +17,21 @@ def send_telegram(text):
       "parse_mode": "HTML",
       "disable_web_page_preview": False,
   }
-  response = requests.post(api_url, json=payload)
-  return response.json()
+  try:
+    response = requests.post(api_url, json=payload, timeout=10)
+    return response.json()
+  except Exception as e:
+    print(f"Ошибка отправки в Telegram: {e}")
+    return {}
 
 
 def load_seen():
   if os.path.exists(SEEN_FILE):
-    with open(SEEN_FILE, "r", encoding="utf-8") as f:
-      return set(json.load(f))
+    try:
+      with open(SEEN_FILE, "r", encoding="utf-8") as f:
+        return set(json.load(f))
+    except:
+      return set()
   return set()
 
 
@@ -35,18 +42,43 @@ def save_seen(seen):
 
 
 def main():
+  if not os.path.exists(SEEN_FILE):
+    save_seen(set())
+
+  # Расширенные заголовки настоящего браузера, чтобы List.am не блокировал
   headers = {
       "User-Agent": (
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
           " like Gecko) Chrome/122.0.0.0 Safari/537.36"
       ),
+      "Accept": (
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+      ),
       "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Referer": "https://www.list.am/",
+      "DNT": "1",
+      "Connection": "keep-alive",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-Fetch-User": "?1",
   }
 
-  print("Запрос к List.am...")
-  resp = requests.get(URL, headers=headers)
+  print("Запрос к List.am с имитацией браузера...")
+  try:
+    resp = requests.get(URL, headers=headers, timeout=15)
+  except Exception as e:
+    print(f"Ошибка соединения с List.am: {e}")
+    return
+
+  print(f"Статус ответа List.am: {resp.status_code}")
   if resp.status_code != 200:
-    print(f"Ошибка загрузки страницы: {resp.status_code}")
+    print(
+        f"Защита List.am всё еще блочит (код {resp.status_code}). Пропускаем"
+        " цикл."
+    )
     return
 
   soup = BeautifulSoup(resp.text, "html.parser")
@@ -70,12 +102,10 @@ def main():
         found_new.append((ad_id, title, full_url))
         new_seen.add(ad_id)
 
-  if len(seen) == 0:
+  if len(seen) == 0 and len(found_new) > 0:
     print(
         "Первый запуск: инициализация базы объявлений без отправки в канал..."
     )
-    for ad_id, title, full_url in found_new:
-      new_seen.add(ad_id)
     save_seen(new_seen)
     print("База успешно инициализирована!")
     return
