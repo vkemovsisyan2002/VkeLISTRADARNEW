@@ -1,7 +1,7 @@
 import json
 import os
 from bs4 import BeautifulSoup
-import cloudscraper
+from playwright.sync_api import sync_playwright
 import requests
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -46,28 +46,40 @@ def main():
   if not os.path.exists(SEEN_FILE):
     save_seen(set())
 
-  scraper = cloudscraper.create_scraper(
-      browser={"browser": "chrome", "platform": "windows", "desktop": True}
-  )
-
-  print("Запрос к List.am через обход защиты...")
+  print("Запуск браузера через Playwright для обхода защиты...")
+  html_content = ""
   try:
-    resp = scraper.get(URL, timeout=20)
+    with sync_playwright() as p:
+      browser = p.chromium.launch(headless=True)
+      context = browser.new_context(
+          user_agent=(
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+              " (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+          ),
+          viewport={"width": 1280, "height": 800},
+      )
+      page = context.new_page()
+      page.goto(URL, timeout=40000, wait_until="domcontentloaded")
+      page.wait_for_timeout(4000)  # Ожидание прогрузки защиты
+      html_content = page.content()
+      browser.close()
   except Exception as e:
-    print(f"Ошибка соединения с List.am: {e}")
+    print(f"Ошибка выполнения браузера: {e}")
     return
 
-  print(f"Статус ответа List.am: {resp.status_code}")
-  if resp.status_code != 200:
-    print(f"Ошибка! Получен код ответа: {resp.status_code}")
-    return
-
-  soup = BeautifulSoup(resp.text, "html.parser")
+  soup = BeautifulSoup(html_content, "html.parser")
   seen = load_seen()
   new_seen = set(seen)
 
   items = soup.find_all("a", href=lambda x: x and x.startswith("/item/"))
   print(f"Найдено ссылок на странице: {len(items)}")
+
+  if len(items) == 0:
+    print(
+        "Внимание: ссылки не найдены. Защита всё ещё блокирует или структура"
+        " изменилась."
+    )
+    return
 
   found_new = []
 
