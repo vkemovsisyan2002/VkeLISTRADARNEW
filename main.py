@@ -46,11 +46,10 @@ def main():
   if not os.path.exists(SEEN_FILE):
     save_seen(set())
 
-  print("Запуск защищенного браузера через Playwright...")
+  print("Запуск браузера и ожидание прогрузки объявлений...")
   html_content = ""
   try:
     with sync_playwright() as p:
-      # Запускаем с аргументами обхода антиботов
       browser = p.chromium.launch(
           headless=True,
           args=[
@@ -67,13 +66,19 @@ def main():
           viewport={"width": 1280, "height": 800},
       )
       page = context.new_page()
-      # Скрываем флаг автоматизации webdriver
       page.add_init_script(
           "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
       )
 
       page.goto(URL, timeout=60000, wait_until="domcontentloaded")
-      page.wait_for_timeout(6000)  # Даем время на прогрузку скриптов страницы
+
+      # Ждем, пока на странице реально появятся ссылки на объявления
+      try:
+        page.wait_for_selector("a[href*='/item/']", timeout=15000)
+      except:
+        print("Предупреждение: селектор объявлений не дождался загрузки.")
+
+      page.wait_for_timeout(3000)
       html_content = page.content()
       browser.close()
   except Exception as e:
@@ -112,21 +117,18 @@ def main():
         break
 
   print(f"📊 Всего найдено объявлений на странице: {len(all_found_ids)}")
-  print(f"🔥 Из них новых (добавленных сегодня/сейчас): {len(found_new)}")
+  print(f"🔥 Из них новых: {len(found_new)}")
 
   if len(seen) == 0:
     print(
         "Первый запуск: инициализация базы объявлений без отправки в канал..."
     )
     save_seen(all_found_ids)
-    print(
-        "База успешно инициализирована! Сохранено в память квартир:"
-        f" {len(all_found_ids)}"
-    )
+    print(f"База инициализирована! Сохранено квартир: {len(all_found_ids)}")
     return
 
   if len(found_new) == 0:
-    print("✅ Проверка завершена. Новых объявлений нет, база в актуальном состоянии.")
+    print("✅ Новых объявлений нет.")
   else:
     for ad_id, title, full_url in reversed(found_new):
       msg = (
@@ -138,7 +140,7 @@ def main():
       print(f"Ответ Telegram: {res}")
 
   save_seen(new_seen)
-  print("Готово. Цикл проверки успешно завершен.")
+  print("Готово.")
 
 
 if __name__ == "__main__":
