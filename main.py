@@ -46,11 +46,19 @@ def main():
   if not os.path.exists(SEEN_FILE):
     save_seen(set())
 
-  print("Запуск браузера через Playwright...")
+  print("Запуск защищенного браузера через Playwright...")
   html_content = ""
   try:
     with sync_playwright() as p:
-      browser = p.chromium.launch(headless=True)
+      # Запускаем с аргументами обхода антиботов
+      browser = p.chromium.launch(
+          headless=True,
+          args=[
+              "--disable-blink-features=AutomationControlled",
+              "--no-sandbox",
+              "--disable-setuid-sandbox",
+          ],
+      )
       context = browser.new_context(
           user_agent=(
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -59,9 +67,13 @@ def main():
           viewport={"width": 1280, "height": 800},
       )
       page = context.new_page()
-      # Используем domcontentloaded вместо networkidle, чтобы избежать тайм-аутов
+      # Скрываем флаг автоматизации webdriver
+      page.add_init_script(
+          "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+      )
+
       page.goto(URL, timeout=60000, wait_until="domcontentloaded")
-      page.wait_for_timeout(4000)  # Даем секунду на отрисовку элементов
+      page.wait_for_timeout(6000)  # Даем время на прогрузку скриптов страницы
       html_content = page.content()
       browser.close()
   except Exception as e:
@@ -73,51 +85,60 @@ def main():
   new_seen = set(seen)
 
   items = soup.find_all("a", href=lambda x: x and "/item/" in x)
-  print(f"Найдено ссылок на странице: {len(items)}")
-
-  if len(items) == 0:
-    print("Внимание: объявления не найдены.")
-    return
 
   found_new = []
+  all_found_ids = set()
 
   for item in items:
     href = item.get("href")
+    if not href:
+      continue
     parts = href.split("/")
     for i, part in enumerate(parts):
       if part == "item" and i + 1 < len(parts):
         ad_id = parts[i + 1].split("?")[0]
-        if ad_id and ad_id not in seen:
-          title = item.text.strip().replace("\n", " ")
-          title = " ".join(title.split())
-          if not title:
-            title = "Квартира в Ереване"
-          full_url = (
-              f"https://www.list.am{href}" if href.startswith("/") else href
-          )
-          found_new.append((ad_id, title, full_url))
-          new_seen.add(ad_id)
+        if ad_id:
+          all_found_ids.add(ad_id)
+          if ad_id not in seen:
+            title = item.text.strip().replace("\n", " ")
+            title = " ".join(title.split())
+            if not title:
+              title = "Квартира в Ереване"
+            full_url = (
+                f"https://www.list.am{href}" if href.startswith("/") else href
+            )
+            found_new.append((ad_id, title, full_url))
+            new_seen.add(ad_id)
         break
 
-  if len(seen) == 0 and len(found_new) > 0:
+  print(f"📊 Всего найдено объявлений на странице: {len(all_found_ids)}")
+  print(f"🔥 Из них новых (добавленных сегодня/сейчас): {len(found_new)}")
+
+  if len(seen) == 0:
     print(
         "Первый запуск: инициализация базы объявлений без отправки в канал..."
     )
-    save_seen(new_seen)
-    print(f"База успешно инициализирована! Сохранено квартир: {len(new_seen)}")
+    save_seen(all_found_ids)
+    print(
+        "База успешно инициализирована! Сохранено в память квартир:"
+        f" {len(all_found_ids)}"
+    )
     return
 
-  for ad_id, title, full_url in reversed(found_new):
-    msg = (
-        f"🏠 <b>Новая квартира в Ереване!</b>\n\n{title}\n\n🔗"
-        f" <a href='{full_url}'>Посмотреть на List.am</a>"
-    )
-    print(f"Отправка объявления {ad_id}...")
-    res = send_telegram(msg)
-    print(f"Ответ Telegram: {res}")
+  if len(found_new) == 0:
+    print("✅ Проверка завершена. Новых объявлений нет, база в актуальном состоянии.")
+  else:
+    for ad_id, title, full_url in reversed(found_new):
+      msg = (
+          f"🏠 <b>Новая квартира в Ереване!</b>\n\n{title}\n\n🔗"
+          f" <a href='{full_url}'>Посмотреть на List.am</a>"
+      )
+      print(f"Отправка объявления {ad_id} в Telegram...")
+      res = send_telegram(msg)
+      print(f"Ответ Telegram: {res}")
 
   save_seen(new_seen)
-  print(f"Готово. Отправлено новых объявлений: {len(found_new)}")
+  print("Готово. Цикл проверки успешно завершен.")
 
 
 if __name__ == "__main__":
