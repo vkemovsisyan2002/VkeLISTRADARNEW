@@ -46,7 +46,7 @@ def main():
   if not os.path.exists(SEEN_FILE):
     save_seen(set())
 
-  print("Запуск браузера через Playwright для обхода защиты...")
+  print("Запуск браузера через Playwright...")
   html_content = ""
   try:
     with sync_playwright() as p:
@@ -59,8 +59,9 @@ def main():
           viewport={"width": 1280, "height": 800},
       )
       page = context.new_page()
-      page.goto(URL, timeout=40000, wait_until="domcontentloaded")
-      page.wait_for_timeout(4000)  # Ожидание прогрузки защиты
+      # Ждем полной загрузки сети и элементов
+      page.goto(URL, timeout=60000, wait_until="networkidle")
+      page.wait_for_timeout(5000)
       html_content = page.content()
       browser.close()
   except Exception as e:
@@ -71,14 +72,12 @@ def main():
   seen = load_seen()
   new_seen = set(seen)
 
-  items = soup.find_all("a", href=lambda x: x and x.startswith("/item/"))
+  # Ищем любые ссылки на объявления
+  items = soup.find_all("a", href=lambda x: x and "/item/" in x)
   print(f"Найдено ссылок на странице: {len(items)}")
 
   if len(items) == 0:
-    print(
-        "Внимание: ссылки не найдены. Защита всё ещё блокирует или структура"
-        " изменилась."
-    )
+    print("Внимание: объявления не найдены.")
     return
 
   found_new = []
@@ -86,21 +85,27 @@ def main():
   for item in items:
     href = item.get("href")
     parts = href.split("/")
-    if len(parts) > 2:
-      ad_id = parts[2]
-      if ad_id not in seen:
-        title = item.text.strip().replace("\n", " ")
-        title = " ".join(title.split())
-        full_url = f"https://www.list.am{href}"
-        found_new.append((ad_id, title, full_url))
-        new_seen.add(ad_id)
+    for i, part in enumerate(parts):
+      if part == "item" and i + 1 < len(parts):
+        ad_id = parts[i + 1].split("?")[0]
+        if ad_id and ad_id not in seen:
+          title = item.text.strip().replace("\n", " ")
+          title = " ".join(title.split())
+          if not title:
+            title = "Квартира в Ереване"
+          full_url = (
+              f"https://www.list.am{href}" if href.startswith("/") else href
+          )
+          found_new.append((ad_id, title, full_url))
+          new_seen.add(ad_id)
+        break
 
   if len(seen) == 0 and len(found_new) > 0:
     print(
         "Первый запуск: инициализация базы объявлений без отправки в канал..."
     )
     save_seen(new_seen)
-    print("База успешно инициализирована!")
+    print(f"База успешно инициализирована! Сохранено квартир: {len(new_seen)}")
     return
 
   for ad_id, title, full_url in reversed(found_new):
