@@ -59,9 +59,9 @@ def main():
           viewport={"width": 1280, "height": 800},
       )
       page = context.new_page()
-      # Ждем полной загрузки сети и элементов
-      page.goto(URL, timeout=60000, wait_until="networkidle")
-      page.wait_for_timeout(5000)
+      # Используем domcontentloaded вместо networkidle, чтобы избежать тайм-аутов
+      page.goto(URL, timeout=60000, wait_until="domcontentloaded")
+      page.wait_for_timeout(4000)  # Даем секунду на отрисовку элементов
       html_content = page.content()
       browser.close()
   except Exception as e:
@@ -72,7 +72,6 @@ def main():
   seen = load_seen()
   new_seen = set(seen)
 
-  # Ищем любые ссылки на объявления
   items = soup.find_all("a", href=lambda x: x and "/item/" in x)
   print(f"Найдено ссылок на странице: {len(items)}")
 
