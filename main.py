@@ -1,6 +1,7 @@
 import json
 import os
 from bs4 import BeautifulSoup
+import cloudscraper
 import requests
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -45,40 +46,20 @@ def main():
   if not os.path.exists(SEEN_FILE):
     save_seen(set())
 
-  # Расширенные заголовки настоящего браузера, чтобы List.am не блокировал
-  headers = {
-      "User-Agent": (
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
-          " like Gecko) Chrome/122.0.0.0 Safari/537.36"
-      ),
-      "Accept": (
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-      ),
-      "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-      "Accept-Encoding": "gzip, deflate, br",
-      "Referer": "https://www.list.am/",
-      "DNT": "1",
-      "Connection": "keep-alive",
-      "Upgrade-Insecure-Requests": "1",
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "same-origin",
-      "Sec-Fetch-User": "?1",
-  }
+  scraper = cloudscraper.create_scraper(
+      browser={"browser": "chrome", "platform": "windows", "desktop": True}
+  )
 
-  print("Запрос к List.am с имитацией браузера...")
+  print("Запрос к List.am через обход защиты...")
   try:
-    resp = requests.get(URL, headers=headers, timeout=15)
+    resp = scraper.get(URL, timeout=20)
   except Exception as e:
     print(f"Ошибка соединения с List.am: {e}")
     return
 
   print(f"Статус ответа List.am: {resp.status_code}")
   if resp.status_code != 200:
-    print(
-        f"Защита List.am всё еще блочит (код {resp.status_code}). Пропускаем"
-        " цикл."
-    )
+    print(f"Ошибка! Получен код ответа: {resp.status_code}")
     return
 
   soup = BeautifulSoup(resp.text, "html.parser")
