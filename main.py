@@ -46,9 +46,10 @@ def main():
   if not os.path.exists(SEEN_FILE):
     save_seen(set())
 
-  print("Запуск браузера и сбор данных с List.am...")
+  print("Запуск браузера и обход Cloudflare...")
   html_content = ""
   page_title = ""
+  
   try:
     with sync_playwright() as p:
       browser = p.chromium.launch(
@@ -57,6 +58,7 @@ def main():
               "--disable-blink-features=AutomationControlled",
               "--no-sandbox",
               "--disable-setuid-sandbox",
+              "--disable-infobars",
           ],
       )
       context = browser.new_context(
@@ -65,6 +67,7 @@ def main():
               " (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
           ),
           viewport={"width": 1280, "height": 800},
+          locale="ru-RU",
       )
       page = context.new_page()
       page.add_init_script(
@@ -72,10 +75,21 @@ def main():
       )
 
       page.goto(URL, timeout=60000, wait_until="domcontentloaded")
-      
-      # Даем время на отрисовку элементов скриптами сайта
-      page.wait_for_timeout(7000)
-      
+
+      # Ждем прохождения экрана "Just a moment..." и имитируем активность человека
+      for _ in range(8):
+        page_title = page.title()
+        if "Just a moment" not in page_title:
+          break
+        print("⏳ Ожидание прохождения защиты Cloudflare...")
+        page.mouse.move(100, 200)
+        page.mouse.down()
+        page.mouse.up()
+        page.evaluate("window.scrollBy(0, 400)")
+        page.wait_for_timeout(3000)
+
+      # Дополнительная пауза для финальной прогрузки карточек
+      page.wait_for_timeout(4000)
       page_title = page.title()
       html_content = page.content()
       browser.close()
@@ -89,7 +103,6 @@ def main():
   seen = load_seen()
   new_seen = set(seen)
 
-  # Собираем абсолютно все ссылки, где встречается /item/
   items = soup.find_all("a", href=lambda x: x and "/item/" in x)
 
   found_new = []
@@ -120,17 +133,16 @@ def main():
   print(f"📊 Всего найдено объявлений на странице: {len(all_found_ids)}")
   print(f"🔥 Из них новых: {len(found_new)}")
 
-  # Если файл пустой (самый первый запуск), сохраняем текущие, чтобы не спамить старыми
   if len(seen) == 0:
     if len(all_found_ids) > 0:
       save_seen(all_found_ids)
       print(f"База успешно инициализирована! Сохранено квартир: {len(all_found_ids)}")
     else:
-      print("⚠️ Внимание: база не инициализирована, так как найдено 0 объявлений. Проверьте заголовок страницы выше.")
+      print("⚠️ Внимание: всё еще 0 объявлений. Проверьте заголовок страницы.")
     return
 
   if len(found_new) == 0:
-    print("✅ Новых объявлений нет.")
+    print("✅ Новых объявлений нет, база актуальна.")
   else:
     for ad_id, title, full_url in reversed(found_new):
       msg = (
