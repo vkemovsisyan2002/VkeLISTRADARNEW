@@ -6,6 +6,7 @@ import requests
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+CF_CLEARANCE = os.getenv("CF_CLEARANCE")  # Кука для обхода Cloudflare
 URL = "https://www.list.am/category/60?n=2%2C3%2C4%2C5%2C6%2C7%2C8%2C9%2C10%2C13%2C11&cmtype=0&crc=1"
 SEEN_FILE = "seen_ads.json"
 
@@ -46,10 +47,9 @@ def main():
   if not os.path.exists(SEEN_FILE):
     save_seen(set())
 
-  print("Запуск браузера и обход Cloudflare...")
+  print("Запуск браузера с внедрением доверенной куки Cloudflare...")
   html_content = ""
   page_title = ""
-  
   try:
     with sync_playwright() as p:
       browser = p.chromium.launch(
@@ -58,7 +58,6 @@ def main():
               "--disable-blink-features=AutomationControlled",
               "--no-sandbox",
               "--disable-setuid-sandbox",
-              "--disable-infobars",
           ],
       )
       context = browser.new_context(
@@ -67,29 +66,24 @@ def main():
               " (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
           ),
           viewport={"width": 1280, "height": 800},
-          locale="ru-RU",
       )
+
+      # Внедряем куку cf_clearance, чтобы Cloudflare сразу пустил без проверки
+      if CF_CLEARANCE:
+        context.add_cookies([{
+            "name": "cf_clearance",
+            "value": CF_CLEARANCE,
+            "domain": ".list.am",
+            "path": "/",
+        }])
+        print("Кука cf_clearance успешно внедрена.")
+      else:
+        print("Внимание: CF_CLEARANCE не найден в секретах GitHub!")
+
       page = context.new_page()
-      page.add_init_script(
-          "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-      )
-
       page.goto(URL, timeout=60000, wait_until="domcontentloaded")
+      page.wait_for_timeout(5000)
 
-      # Ждем прохождения экрана "Just a moment..." и имитируем активность человека
-      for _ in range(8):
-        page_title = page.title()
-        if "Just a moment" not in page_title:
-          break
-        print("⏳ Ожидание прохождения защиты Cloudflare...")
-        page.mouse.move(100, 200)
-        page.mouse.down()
-        page.mouse.up()
-        page.evaluate("window.scrollBy(0, 400)")
-        page.wait_for_timeout(3000)
-
-      # Дополнительная пауза для финальной прогрузки карточек
-      page.wait_for_timeout(4000)
       page_title = page.title()
       html_content = page.content()
       browser.close()
@@ -136,9 +130,11 @@ def main():
   if len(seen) == 0:
     if len(all_found_ids) > 0:
       save_seen(all_found_ids)
-      print(f"База успешно инициализирована! Сохранено квартир: {len(all_found_ids)}")
+      print(f"База инициализирована! Сохранено квартир: {len(all_found_ids)}")
     else:
-      print("⚠️ Внимание: всё еще 0 объявлений. Проверьте заголовок страницы.")
+      print(
+          "⚠️ Найдено 0 объявлений. Проверьте, правильная ли кука cf_clearance."
+      )
     return
 
   if len(found_new) == 0:
