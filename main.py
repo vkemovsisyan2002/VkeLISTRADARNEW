@@ -46,8 +46,9 @@ def main():
   if not os.path.exists(SEEN_FILE):
     save_seen(set())
 
-  print("Запуск браузера и ожидание прогрузки объявлений...")
+  print("Запуск браузера и сбор данных с List.am...")
   html_content = ""
+  page_title = ""
   try:
     with sync_playwright() as p:
       browser = p.chromium.launch(
@@ -71,24 +72,24 @@ def main():
       )
 
       page.goto(URL, timeout=60000, wait_until="domcontentloaded")
-
-      # Ждем, пока на странице реально появятся ссылки на объявления
-      try:
-        page.wait_for_selector("a[href*='/item/']", timeout=15000)
-      except:
-        print("Предупреждение: селектор объявлений не дождался загрузки.")
-
-      page.wait_for_timeout(3000)
+      
+      # Даем время на отрисовку элементов скриптами сайта
+      page.wait_for_timeout(7000)
+      
+      page_title = page.title()
       html_content = page.content()
       browser.close()
   except Exception as e:
     print(f"Ошибка выполнения браузера: {e}")
     return
 
+  print(f"📄 Заголовок страницы: {page_title}")
+
   soup = BeautifulSoup(html_content, "html.parser")
   seen = load_seen()
   new_seen = set(seen)
 
+  # Собираем абсолютно все ссылки, где встречается /item/
   items = soup.find_all("a", href=lambda x: x and "/item/" in x)
 
   found_new = []
@@ -119,12 +120,13 @@ def main():
   print(f"📊 Всего найдено объявлений на странице: {len(all_found_ids)}")
   print(f"🔥 Из них новых: {len(found_new)}")
 
+  # Если файл пустой (самый первый запуск), сохраняем текущие, чтобы не спамить старыми
   if len(seen) == 0:
-    print(
-        "Первый запуск: инициализация базы объявлений без отправки в канал..."
-    )
-    save_seen(all_found_ids)
-    print(f"База инициализирована! Сохранено квартир: {len(all_found_ids)}")
+    if len(all_found_ids) > 0:
+      save_seen(all_found_ids)
+      print(f"База успешно инициализирована! Сохранено квартир: {len(all_found_ids)}")
+    else:
+      print("⚠️ Внимание: база не инициализирована, так как найдено 0 объявлений. Проверьте заголовок страницы выше.")
     return
 
   if len(found_new) == 0:
